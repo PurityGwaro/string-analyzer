@@ -126,8 +126,9 @@ router.get("/:id", async (req, res) => {
 router.delete("/:string_value", async (req, res) => {
     const { string_value } = req.params
     try {
-        const string = await deleteStringByValue(string_value)
-        res.status(200).json(string)
+        const decodedValue = decodeURIComponent(string_value)
+        await deleteStringByValue(decodedValue)
+        res.status(204).send()
     } catch (error) {
         if (error.code === 404) {
             return res.status(404).json({ message: "String does not exist in the system" })
