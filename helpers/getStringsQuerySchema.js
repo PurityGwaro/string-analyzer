@@ -11,7 +11,7 @@ const getStringsQuerySchema = Joi.object({
 const validateGetStringsQuery = (req, res, next) => {
     const { error } = getStringsQuerySchema.validate(req.query)
     if (error) {
-        return res.status(400).json({ message: error.details[0].message })
+        return res.status(400).json({ message: "Invalid query parameter values or types" })
     }
     next()
 }

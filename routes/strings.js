@@ -1,188 +1,127 @@
-import express from "express";
-import { StringModel } from "../models/schema/string.js";
-import { hashString } from "../helpers/hashString.js";
-import { checkIfPalindrome } from "../helpers/checkIfPalindrome.js";
-import { checkUniqueCharacters } from "../helpers/checkUniqueCharacters.js";
-import { checkWordCount } from "../helpers/checkWordCount.js";
-import { getCharacterFrequencyMap } from "../helpers/getCharacterFrequencyMap.js";
-import { parseNaturalLanguageQuery } from "../helpers/parseNaturalLanguage.js";
+import express from 'express'
+import createString from '../services/strings/createString/index.js'
+import { getStrings, getStringById, getStringByValue } from '../services/strings/getStrings/index.js'
+import validateCreateStringRequestSchema from '../helpers/createStringRequestSchema.js'
+import { transformString } from '../helpers/transformString.js'
+import validateGetStringsQuery from '../helpers/getStringsQuerySchema.js'
+import { deleteStringByValue } from '../services/strings/deleteString/index.js'
+import { parseNaturalLanguageQuery } from '../helpers/parseNaturalLanguage.js'
 
-const router = express.Router();
+const router = express.Router()
 
-router.post("/", async (req, res) => {
-  try {
-    const { value } = req.body;
-
-    if (!value)
-      return res
-        .status(400)
-        .json({ error: 'Invalid request body or missing "value" field' });
-
-    if (typeof value !== "string")
-      return res
-        .status(422)
-        .json({ error: 'Invalid data type for "value" (must be string)' });
-
-    const hash = hashString(value);
-    const stringProperties = {
-      id: hash,
-      value: value,
-      properties: {
-        length: value.length,
-        is_palindrome: checkIfPalindrome(value),
-        unique_characters: checkUniqueCharacters(value),
-        word_count: checkWordCount(value),
-        sha256_hash: hash,
-        character_frequency_map: getCharacterFrequencyMap(value),
-      },
-      created_at: new Date().toISOString(),
-    };
-    const newString = new StringModel(stringProperties);
-    await newString.save();
-
-    res.status(201).json(stringProperties);
-  } catch (err) {
-    if (err.code === 11000) {
-      return res
-        .status(409)
-        .json({ error: "String already exists in the system" });
+router.post("/", validateCreateStringRequestSchema, async (req, res) => {
+    const { value } = req.body
+    try {
+        const string = await createString(value)
+        res.status(201).json({
+            id: string.id,
+            value: string.value,
+            properties: string.properties,
+            created_at: string.created_at
+        })
+    } catch (error) {
+        if (error.code === 11000) {
+            return res.status(409).json({ message: "String already exists in the system" })
+        }
+        res.status(500).json({ message: error.message })
     }
-    res.status(500).json({ error: "An internal server error occurred" });
-  }
-});
+})
 
 router.get("/filter-by-natural-language", async (req, res) => {
-  try {
-    const { query } = req.query;
-
+    const { query } = req.query
+    
     if (!query) {
-      return res
-        .status(400)
-        .json({ error: "Query parameter 'query' is required." });
+        return res.status(400).json({ message: "Query parameter is required" })
     }
 
-    const parsedFilters = parseNaturalLanguageQuery(query);
-    
-    const filter = {};
-    
-    if (parsedFilters.is_palindrome !== undefined) {
-      filter["properties.is_palindrome"] = parsedFilters.is_palindrome;
+    try {
+        const filters = parseNaturalLanguageQuery(query)
+        const strings = await getStrings(filters)
+        
+        res.status(200).json({
+            data: strings.map(string => transformString(string)),
+            count: strings.length,
+            interpreted_query: {
+                original: query,
+                parsed_filters: filters
+            }
+        })
+    } catch (error) {
+        if (error.code === 400) {
+            return res.status(400).json({ message: "Unable to parse natural language query" })
+        }
+        if (error.code === 422) {
+            return res.status(422).json({ message: "Query parsed but resulted in conflicting filters" })
+        }
+        res.status(500).json({ message: error.message })
     }
-    if (parsedFilters.word_count !== undefined) {
-      filter["properties.word_count"] = parsedFilters.word_count;
-    }
-    if (parsedFilters.min_length !== undefined) {
-      filter["properties.length"] = filter["properties.length"] || {};
-      filter["properties.length"].$gt = parsedFilters.min_length - 1;
-    }
-    if (parsedFilters.max_length !== undefined) {
-      filter["properties.length"] = filter["properties.length"] || {};
-      filter["properties.length"].$lt = parsedFilters.max_length + 1;
-    }
-    if (parsedFilters.contains_character !== undefined) {
-      filter.value = { $regex: parsedFilters.contains_character, $options: "i" };
-    }
-
-    const strings = await StringModel.find(filter);
-
-    res.status(200).json({
-      data: strings,
-      count: strings.length,
-      interpreted_query: {
-        original: query,
-        parsed_filters: parsedFilters,
-      },
-    });
-  } catch (err) {
-    if (err.code === 400) {
-      return res.status(400).json({ error: err.message });
-    }
-    if (err.code === 422) {
-      return res.status(422).json({ error: err.message });
-    }
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/", async (req, res) => {
-  try {
-    const {
-      is_palindrome,
-      min_length,
-      max_length,
-      word_count,
-      contains_character,
-    } = req.query;
-
-    const filter = {};
-
-    if (is_palindrome !== undefined) {
-      filter["properties.is_palindrome"] = is_palindrome === "true";
-    }
-    if (min_length) {
-      filter["properties.length"] = {
-        ...(filter["properties.length"] || {}),
-        $gte: parseInt(min_length, 10),
-      };
-    }
-    if (max_length) {
-      filter["properties.length"] = {
-        ...(filter["properties.length"] || {}),
-        $lte: parseInt(max_length, 10),
-      };
-    }
-    if (word_count) {
-      filter["properties.word_count"] = parseInt(word_count, 10);
-    }
-    if (contains_character) {
-      filter.value = { $regex: contains_character, $options: "i" };
-    }
-
-    const strings = await StringModel.find(filter);
-    const appliedFilters = {};
-    for (const key in req.query) {
-      if (req.query[key] !== undefined) {
-        appliedFilters[key] = req.query[key];
-      }
-    }
-    res.status(200).json({
-      data: strings,
-      count: strings.length,
-      filters_applied: appliedFilters,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+})
 
 router.get("/:string_value", async (req, res) => {
-  try {
-    const string = await StringModel.findOne({
-      value: req.params.string_value,
-    });
-    if (!string) return res.status(404).json({ error: "String not found" });
-    res.status(200).json(string);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const { string_value } = req.params
+    try {
+        const decodedValue = decodeURIComponent(string_value)
+        const string = await getStringByValue(decodedValue)
+        res.status(200).json(string)
+    } catch (error) {
+        if (error.code === 404) {
+            return res.status(404).json({ message: "String does not exist in the system" })
+        }
+        res.status(500).json({ message: error.message })
+    }
+})
+
+router.get("/", validateGetStringsQuery, async (req, res) => {
+    try {
+        const filters = {}
+        const filtersApplied = {}
+
+        if (req.query.is_palindrome !== undefined) {
+            filters.is_palindrome = req.query.is_palindrome === 'true' || req.query.is_palindrome === true
+            filtersApplied.is_palindrome = filters.is_palindrome
+        }
+        if (req.query.min_length !== undefined) {
+            filters.min_length = parseInt(req.query.min_length)
+            filtersApplied.min_length = filters.min_length
+        }
+        if (req.query.max_length !== undefined) {
+            filters.max_length = parseInt(req.query.max_length)
+            filtersApplied.max_length = filters.max_length
+        }
+        if (req.query.word_count !== undefined) {
+            filters.word_count = parseInt(req.query.word_count)
+            filtersApplied.word_count = filters.word_count
+        }
+        if (req.query.contains_character !== undefined) {
+            filters.contains_character = req.query.contains_character
+            filtersApplied.contains_character = filters.contains_character
+        }
+        const strings = await getStrings(filters)
+        res.status(200).json({
+            data: strings.map(string => transformString(string)),
+            count: strings.length,
+            filters_applied: filtersApplied
+        })
+    } catch (error) {
+        if (error.code === 400) {
+            return res.status(400).json({ message: "Invalid query parameter values or types" })
+        }
+        res.status(500).json({ message: error.message })
+    }
+})
 
 router.delete("/:string_value", async (req, res) => {
-  try {
-    const string = await StringModel.findOneAndDelete({
-      value: req.params.string_value,
-    });
-
-    if (!string) {
-      return res
-        .status(404)
-        .json({ error: "String does not exist in the system" });
+    const { string_value } = req.params
+    try {
+        const decodedValue = decodeURIComponent(string_value)
+        await deleteStringByValue(decodedValue)
+        res.status(204).send()
+    } catch (error) {
+        if (error.code === 404) {
+            return res.status(404).json({ message: "String does not exist in the system" })
+        }
+        res.status(500).json({ message: error.message })
     }
+})
 
-    res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-export default router;
+export default router
