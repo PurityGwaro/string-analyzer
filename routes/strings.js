@@ -110,19 +110,6 @@ router.get("/", validateGetStringsQuery, async (req, res) => {
     }
 })
 
-router.get("/:id", async (req, res) => {
-    const { id } = req.params
-    try {
-        const string = await getStringById(id)
-        res.status(200).json(string)
-    } catch (error) {
-        if (error.code === 404) {
-            return res.status(404).json({ message: "String does not exist in the system" })
-        }
-        res.status(500).json({ message: error.message })
-    }
-})
-
 router.delete("/:string_value", async (req, res) => {
     const { string_value } = req.params
     try {
