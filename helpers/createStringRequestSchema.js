@@ -5,6 +5,10 @@ const createStringRequestSchema = Joi.object({
 })
 
 const validateCreateStringRequestSchema = (req, res, next) => {
+    if (!req.body || typeof req.body !== 'object') {
+        return res.status(400).json({ message: 'Invalid request body or missing "value" field' })
+    }
+
     const { error, value } = createStringRequestSchema.validate(req.body)
     if (error) {
         const errorMessage = error.details[0].message
