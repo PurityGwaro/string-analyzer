@@ -13,7 +13,7 @@ router.post("/", validateCreateStringRequestSchema, async (req, res) => {
     const { value } = req.body
     try {
         const string = await createString(value)
-        res.status(200).json({
+        res.status(201).json({
             id: string.id,
             value: string.value,
             properties: string.properties,
@@ -21,16 +21,7 @@ router.post("/", validateCreateStringRequestSchema, async (req, res) => {
         })
     } catch (error) {
         if (error.code === 11000) {
-            return res.status(409).json({ message: "String value already exists in the database" })
-        }
-        if (error.code === 409) {
             return res.status(409).json({ message: "String already exists in the system" })
-        }
-        if (error.code === 422) {
-            return res.status(422).json({ message: `Invalid data type for "value" (must be string)` })
-        }
-        if (error.code === 400) {
-            return res.status(400).json({ message: `Invalid request body or missing "value" field` })
         }
         res.status(500).json({ message: error.message })
     }
